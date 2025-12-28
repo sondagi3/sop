@@ -1,0 +1,38 @@
+BrandM3dia KioskOps Offline Portal — QA Report
+Version: v4.0-full
+Build date: 2025-12-27
+
+What was failing (reported):
+- “Document Control” / buttons not navigating or opening resources.
+- Multiple local links referenced paths that did not exist in the clean bundle (e.g., SOP/... and Scripts/...).
+
+Root causes found:
+1) Missing folders/files that the portal links referenced:
+   - The portal HTML referenced SOP/ and Scripts/ folders, but the clean bundle only had docs/ and scripts/.
+   - Document Control referenced versioned filenames (v3.2-clean) that were not shipped in the bundle.
+
+Fixes applied in v4.0:
+- Added the complete SOP folder from the provided SOP ZIP to /SOP
+- Added the complete Scripts folder from the provided Scripts ZIP to /Scripts
+- Updated Document Control download links to stable shipped files in /docs:
+  - docs/BrandM3dia_Kiosk_Field_Execution_Guide.pdf
+  - docs/BrandM3dia_Kiosk_Field_Execution_Guide.docx
+  - docs/BrandM3dia_Kiosk_Scenario_Router_OnePager.pdf/.docx and stable alias docs/BrandM3dia_Kiosk_Scenario_Router.pdf
+- Added a BOOT DIAGNOSTICS banner that appears if assets/app.js fails to load or JS crashes.
+- Added a NAVIGATION FALLBACK that switches sections even if inline onclick is blocked by a browser policy.
+- Added an AUTO-EXPORT block that exposes all functions used by inline onclick handlers on window.
+
+Link integrity validation:
+- All local href/src references in index.html resolved to existing files in the bundle (0 missing).
+
+How to run (recommended):
+- Ubuntu:  python3 tools/serve_portal.py
+- Windows: py tools\serve_portal.py
+Then open:
+- http://localhost:8787/
+
+If something fails in the field:
+- Open DevTools Console (F12) and look for 404 errors
+- Confirm these load:
+  - http://localhost:8787/assets/app.js
+  - http://localhost:8787/assets/app.css

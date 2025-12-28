@@ -1,0 +1,20 @@
+Prepare Offline Files:
+
+Download these to C:\offline\ beforehand:
+
+WordPress: wordpress.org/latest.zip
+
+WP-CLI: wp-cli.phar
+
+Your .wpress backup file.
+
+Run the Script:
+
+powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force
+.\deploy-kiosk.ps1
+Post-Installation:
+
+Set the kiosk browser to auto-launch in fullscreen mode.
+
+Disable user input (e.g., keyboard/mouse restrictions via Group Policy).

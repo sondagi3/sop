@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Portal Self-Test (v3.1)</title>
+  <link rel="stylesheet" href="assets/app.css"/>
+  <style>
+    body{padding:24px}
+    .ok{font-weight:700}
+    .bad{font-weight:700}
+    code{background:rgba(0,0,0,.05);padding:2px 6px;border-radius:6px}
+  </style>
+</head>
+<body>
+  <h1>Portal Self-Test (v3.1)</h1>
+  <p>This page checks that key local files exist next to this portal folder.</p>
+  <button id="run">Run self-test</button>
+  <pre id="out" style="margin-top:16px;white-space:pre-wrap"></pre>
+
+<script>
+const files = [
+  "index.html",
+  "assets/app.css",
+  "assets/app.js",
+  "data/portal.config.json",
+  "docs/BrandM3dia_Kiosk_Field_Execution_Guide.pdf",
+  "docs/BrandM3dia_Kiosk_Field_Execution_Guide.docx",
+  "docs/BrandM3dia_Kiosk_Scenario_Router.pdf",
+  "templates/windows_kiosk_setup.ps1",
+  "templates/android_kiosk_setup_adb.sh"
+];
+
+async function check(path){
+  try{
+    const r = await fetch(path, {cache:"no-store"});
+    return r.ok;
+  }catch(e){
+    return null; // likely file:// restrictions
+  }
+}
+
+document.getElementById("run").onclick = async () => {
+  const out = document.getElementById("out");
+  out.textContent = "Running...\n\n";
+  let serverMode = true;
+  for(const f of files){
+    const ok = await check(f);
+    if(ok === null){ serverMode = false; break; }
+  }
+  if(!serverMode){
+    out.textContent += "NOTE: You are likely running via file://.\n" +
+      "For best results, start the Java server (java-server/README.md) then open http://localhost:8787/index.html\n\n";
+  }
+  for(const f of files){
+    const ok = await check(f);
+    if(ok === null){
+      out.textContent += `[?] ${f} (cannot verify in file:// mode)\n`;
+    }else if(ok){
+      out.textContent += `[OK] ${f}\n`;
+    }else{
+      out.textContent += `[MISSING] ${f}\n`;
+    }
+  }
+};
+</script>
+</body>
+</html>

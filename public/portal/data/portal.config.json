@@ -1,0 +1,22 @@
+{
+  "portal_version": "v4.0-full",
+  "branding": {
+    "title": "BrandM3dia KioskOps Offline Portal",
+    "subtitle": "Single Source of Truth (offline-capable)"
+  },
+  "links": {
+    "sop_library_index": "https://3.basecamp.com/4938325/buckets/20576475/vaults/9409145986",
+    "hardware_docs": "https://3.basecamp.com/4938325/buckets/20576475/card_tables/columns/9116848125",
+    "scripts_repo": "https://3.basecamp.com/4938325/buckets/20576475/vaults/9409146592",
+    "os_imaging_baseline": "https://3.basecamp.com/4938325/buckets/20576475/vaults/9409240123",
+    "kiosk_mode_online": "https://3.basecamp.com/4938325/buckets/20576475/vaults/9409264331",
+    "kiosk_mode_uploads": "https://3.basecamp.com/4938325/buckets/20576475/uploads/9409277758",
+    "pre_rental_live_after_sales_bundle": "https://3.basecamp.com/4938325/buckets/20576475/vaults/9409270125"
+  },
+  "local_docs": {
+    "field_execution_guide_pdf": "docs/BrandM3dia_Kiosk_Field_Execution_Guide.pdf",
+    "field_execution_guide_docx": "docs/BrandM3dia_Kiosk_Field_Execution_Guide.docx",
+    "scenario_router_pdf": "docs/BrandM3dia_Kiosk_Scenario_Router.pdf"
+  },
+  "build_date": "2025-12-27"
+}

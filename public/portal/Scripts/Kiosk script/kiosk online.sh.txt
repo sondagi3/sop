@@ -1,0 +1,202 @@
+#!/bin/bash
+
+# Configuration
+CONFIG_FILE="/home/kiosk/kiosk_config.cfg"
+LOADING_SCREEN="file:///home/kiosk/loading.html"  # Path to your loading GIF page
+SCHEDULE_FILE="/home/kiosk/kiosk_schedule.cfg"    # Path to schedule configuration
+
+# Static settings
+check_interval=5   # More frequent checks for smoother transitions (seconds)
+timeout=15         # Faster fallback to offline mode (seconds)
+time_check_interval=60  # How often to check for time-based URL changes (seconds)
+
+# State variables
+current_mode="booting"
+chrome_pid=0
+elapsed_time=0
+last_main_page=""
+last_offline_page=""
+time_check_counter=0
+current_schedule_url=""
+
+# -------------------------------------------------------------------
+# FUNCTIONS
+# -------------------------------------------------------------------
+
+# Load configuration
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+        echo "Config loaded - Main: $main_page, Offline: $offline_page"
+    else
+        echo "ERROR: Config file missing!"
+        exit 1
+    fi
+}
+
+# Function to get URL based on current time
+get_scheduled_url() {
+    # Default to main page if no schedule matches
+    local scheduled_url="$main_page"
+    
+    # Return default if schedule file doesn't exist
+    if [ ! -f "$SCHEDULE_FILE" ]; then
+        echo "$scheduled_url"
+        return
+    fi
+    
+    # Get current time in 24-hour format (HH:MM)
+    local current_time=$(date +"%H:%M")
+    local current_day=$(date +"%u")  # 1-7, Monday is 1
+    
+    # Read schedule file and find matching time slot
+    while IFS='|' read -r days time_start time_end url || [[ -n "$days" ]]; do
+        # Skip comments and empty lines
+        [[ "$days" =~ ^#.*$ || -z "$days" ]] && continue
+        
+        # Check if current day matches (days format: 1,2,3,4,5,6,7)
+        if [[ "$days" == "all" || "$days" == "*" || "$days" =~ $current_day ]]; then
+            # Check if current time is within time range
+            if [[ "$current_time" > "$time_start" && "$current_time" < "$time_end" ]]; then
+                scheduled_url="$url"
+                break
+            fi
+        fi
+    done < "$SCHEDULE_FILE"
+    
+    echo "$scheduled_url"
+}
+
+check_internet() {
+    # Faster check with multiple methods
+    if ping -c 1 -W 1 8.8.8.8 >/dev/null 2>&1 || \
+       curl -Is https://www.google.com --connect-timeout 1 >/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+check_chrome_errors() {
+    [ $chrome_pid -eq 0 ] && return 1
+    
+    # Check if Chrome process exists
+    if ! kill -0 $chrome_pid 2>/dev/null; then
+        return 1
+    fi
+    
+    # Check for error dialogs (requires xdotool)
+    if command -v xdotool >/dev/null; then
+        if xdotool search --name "Error|Crash|Aw, Snap!" >/dev/null; then
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+start_chrome() {
+    local url="$1"
+    local loading="$2"
+    
+    # First show loading screen if requested
+    if [ "$loading" = true ]; then
+        echo "Showing loading screen..."
+        pkill -f "chrome.*--kiosk"
+        google-chrome --password-store=basic --kiosk --no-first-run \
+            --disable-pinch --disable-infobars --noerrdialogs \
+            "$LOADING_SCREEN" >/dev/null 2>&1 &
+        sleep 2  # Allow loading screen to appear
+    fi
+    
+    # Now load actual content
+    echo "Loading: $url"
+    pkill -f "chrome.*--kiosk"
+    google-chrome --password-store=basic --kiosk --no-first-run \
+        --disable-pinch --disable-infobars --noerrdialogs \
+        --disable-component-update --check-for-update-interval=31536000 \
+        "$url" >/dev/null 2>&1 &
+    chrome_pid=$!
+    
+    # Hide cursor (optional)
+    command -v unclutter >/dev/null && unclutter -idle 1 &
+}
+
+# Initial setup
+trap 'pkill -f "chrome.*--kiosk"; exit' SIGINT SIGTERM
+
+# -------------------------------------------------------------------
+# MAIN LOOP
+# -------------------------------------------------------------------
+
+# Initial load
+load_config
+
+# Set initial URL state
+last_main_page="$main_page"
+last_offline_page="$offline_page"
+current_schedule_url=$(get_scheduled_url)
+
+# Initial start (with loading screen)
+start_chrome "$current_schedule_url" true
+
+while true; do
+    # Check for config changes
+    load_config
+    
+    # URL change detection
+    if [ "$last_main_page" != "$main_page" ] || \
+       [ "$last_offline_page" != "$offline_page" ]; then
+        echo "URL change detected - reloading..."
+        last_main_page="$main_page"
+        last_offline_page="$offline_page"
+        current_schedule_url=$(get_scheduled_url)
+        start_chrome "$current_schedule_url" true
+        current_mode="online"
+        elapsed_time=0
+    fi
+
+    # Time-based URL check
+    if [ $time_check_counter -ge $time_check_interval ]; then
+        time_check_counter=0
+        new_url=$(get_scheduled_url)
+        
+        if [ "$new_url" != "$current_schedule_url" ] && [ "$current_mode" = "online" ]; then
+            echo "Time-based URL change: $new_url"
+            current_schedule_url="$new_url"
+            start_chrome "$current_schedule_url" true
+        fi
+    else
+        ((time_check_counter += check_interval))
+    fi
+
+    # Chrome health check
+    if ! check_chrome_errors; then
+        echo "Chrome error - recovering..."
+        start_chrome "$current_schedule_url" true
+        current_mode="online"
+        elapsed_time=0
+    fi
+
+    # Internet state machine
+    if check_internet; then
+        if [ "$current_mode" != "online" ]; then
+            echo "Internet restored - switching to scheduled page"
+            current_schedule_url=$(get_scheduled_url)
+            start_chrome "$current_schedule_url" true
+            current_mode="online"
+            elapsed_time=0
+        fi
+    else
+        echo "Internet offline (${elapsed_time}s)"
+        ((elapsed_time += check_interval))
+        
+        if [ "$current_mode" = "online" ] && [ $elapsed_time -ge $timeout ]; then
+            echo "Switching to offline content"
+            start_chrome "$offline_page" true
+            current_mode="offline"
+        fi
+    fi
+
+    sleep $check_interval
+done

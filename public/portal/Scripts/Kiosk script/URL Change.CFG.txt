@@ -1,0 +1,18 @@
+# Schedule format: days|start_time|end_time|url
+# days: day numbers (1=Monday, 7=Sunday) or "all" for every day
+# times in 24-hour format (HH:MM)
+
+# Weekday morning content (8AM-12PM)
+1,2,3,4,5|08:00|12:00|https://morning.example.com
+
+# Weekday afternoon content (12PM-5PM)
+1,2,3,4,5|12:00|17:00|https://afternoon.example.com
+
+# Evening content (5PM-10PM, all days)
+all|17:00|22:00|https://evening.example.com
+
+# Night content (10PM-8AM, all days)
+all|22:00|08:00|https://night.example.com
+
+# Weekend special content (8AM-10PM)
+6,7|08:00|22:00|https://weekend.example.com

@@ -1,0 +1,205 @@
+#!/bin/bash
+
+# Setup script for Kiosk Admin Panel
+# This script installs required dependencies and sets up the admin panel
+
+# Check if running as root
+if [ "$EUID" -ne 0 ]; then
+  echo "Please run as root or with sudo"
+  exit 1
+fi
+
+# Configuration
+KIOSK_USER="kiosk"
+KIOSK_HOME="/home/$KIOSK_USER"
+ADMIN_PANEL_FILE="$KIOSK_HOME/kiosk_admin_panel.py"
+KIOSK_SCRIPT_FILE="$KIOSK_HOME/start-online-kiosk-enhanced.sh"
+CONTENT_DIR="$KIOSK_HOME/content"
+DATABASE_FILE="$KIOSK_HOME/kiosk.db"
+LOADING_FILE="$KIOSK_HOME/loading.html"
+
+# Display banner
+echo "======================================================"
+echo "         Kiosk Admin Panel Setup Script                "
+echo "======================================================"
+echo
+
+# Install dependencies
+echo "Installing dependencies..."
+apt-get update
+apt-get install -y python3 python3-pip unclutter google-chrome-stable xdotool sqlite3
+pip3 install flask werkzeug
+
+# Create kiosk user if it doesn't exist
+if ! id "$KIOSK_USER" &>/dev/null; then
+    echo "Creating kiosk user..."
+    useradd -m -s /bin/bash "$KIOSK_USER"
+    # Add to required groups (adjust as needed)
+    usermod -a -G video,audio,input "$KIOSK_USER"
+fi
+
+# Create necessary directories
+echo "Setting up directories..."
+mkdir -p "$CONTENT_DIR"
+mkdir -p "$KIOSK_HOME/templates"
+
+# Create simple loading screen
+echo "Creating loading screen..."
+cat > "$LOADING_FILE" << 'EOL'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Loading...</title>
+    <style>
+        body {
+            background-color: #000;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .loader {
+            border: 16px solid #333;
+            border-top: 16px solid #3498db;
+            border-radius: 50%;
+            width: 120px;
+            height: 120px;
+            animation: spin 2s linear infinite;
+            margin-bottom: 20px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="loader"></div>
+    <h1>Loading Digital Signage...</h1>
+</body>
+</html>
+EOL
+
+# Copy script files from current directory
+echo "Setting up admin panel and kiosk script..."
+
+# Check if the admin panel file exists in the current directory
+if [ -f "./kiosk_admin_panel.py" ]; then
+    cp "./kiosk_admin_panel.py" "$ADMIN_PANEL_FILE"
+else
+    echo "ERROR: kiosk_admin_panel.py not found in current directory!"
+    exit 1
+fi
+
+# Check if the enhanced kiosk script exists in the current directory
+if [ -f "./start-online-kiosk-enhanced.sh" ]; then
+    cp "./start-online-kiosk-enhanced.sh" "$KIOSK_SCRIPT_FILE"
+else
+    echo "ERROR: start-online-kiosk-enhanced.sh not found in current directory!"
+    exit 1
+fi
+
+# Set permissions
+echo "Setting permissions..."
+chmod +x "$ADMIN_PANEL_FILE"
+chmod +x "$KIOSK_SCRIPT_FILE"
+chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME"
+
+# Create basic fallback content
+echo "Creating fallback content..."
+cat > "$CONTENT_DIR/fallback.html" << 'EOL'
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Offline Mode</title>
+    <style>
+        body {
+            background-color: #333;
+            color: #fff;
+            font-family: Arial, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        .message {
+            text-align: center;
+            max-width: 600px;
+            padding: 20px;
+        }
+        .icon {
+            font-size: 100px;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="message">
+        <div class="icon">📶</div>
+        <h1>Offline Mode</h1>
+        <p>Internet connection is currently unavailable. The system is displaying offline content.</p>
+    </div>
+</body>
+</html>
+EOL
+
+# Create systemd service for autostart
+echo "Setting up systemd service..."
+cat > /etc/systemd/system/kiosk.service << EOL
+[Unit]
+Description=Kiosk Digital Signage Service
+After=network.target
+
+[Service]
+User=$KIOSK_USER
+WorkingDirectory=$KIOSK_HOME
+ExecStart=$KIOSK_SCRIPT_FILE
+Restart=always
+RestartSec=5
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=graphical.target
+EOL
+
+# Enable and start the service
+systemctl daemon-reload
+systemctl enable kiosk.service
+
+# Create auto-login for kiosk (for Ubuntu)
+if [ -d "/etc/lightdm" ]; then
+    echo "Setting up auto-login..."
+    mkdir -p /etc/lightdm/lightdm.conf.d
+    cat > /etc/lightdm/lightdm.conf.d/50-kiosk-autologin.conf << EOL
+[Seat:*]
+autologin-user=$KIOSK_USER
+autologin-user-timeout=0
+EOL
+else
+    echo "LightDM not detected. You may need to set up auto-login manually."
+fi
+
+# Finished
+echo
+echo "======================================================"
+echo "Setup completed!"
+echo
+echo "Default admin credentials:"
+echo "  Username: admin"
+echo "  Password: admin"
+echo
+echo "Admin panel will be available at: http://localhost:8080"
+echo "or from another device at: http://YOUR_IP_ADDRESS:8080"
+echo
+echo "IMPORTANT: Change the default password after logging in!"
+echo "======================================================"
+echo
+echo "To start the kiosk now, run:"
+echo "systemctl start kiosk.service"
+echo

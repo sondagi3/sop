@@ -1,0 +1,235 @@
+#!/bin/bash
+
+# Configuration
+CONFIG_FILE="/home/kiosk/kiosk_config.cfg"
+LOADING_SCREEN="file:///home/kiosk/loading.html"  # Path to your loading GIF page
+ADMIN_PANEL_URL="http://localhost:8080"  # URL for the admin panel
+ADMIN_PID_FILE="/home/kiosk/admin_panel.pid"
+ADMIN_LOG_FILE="/home/kiosk/admin_panel.log"
+
+# Static settings
+check_interval=5   # More frequent checks for smoother transitions (seconds)
+timeout=15         # Faster fallback to offline mode (seconds)
+
+# Load configuration
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+        echo "Config loaded - Main: $main_page, Offline: $offline_video_page"
+    else
+        echo "ERROR: Config file missing!"
+        exit 1
+    fi
+}
+
+# Initial load
+load_config
+
+# State variables
+current_mode="booting"
+chrome_pid=0
+elapsed_time=0
+last_main_page="$main_page"
+last_offline_page="$offline_video_page"
+use_admin_panel=true
+
+# -------------------------------------------------------------------
+# FUNCTIONS
+# -------------------------------------------------------------------
+
+check_internet() {
+    # Faster check with multiple methods
+    if ping -c 1 -W 1 8.8.8.8 >/dev/null 2>&1 || \
+       curl -Is https://www.google.com --connect-timeout 1 >/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+check_chrome_errors() {
+    [ $chrome_pid -eq 0 ] && return 1
+    
+    # Check if Chrome process exists
+    if ! kill -0 $chrome_pid 2>/dev/null; then
+        return 1
+    fi
+    
+    # Check for error dialogs (requires xdotool)
+    if command -v xdotool >/dev/null; then
+        if xdotool search --name "Error|Crash|Aw, Snap!" >/dev/null; then
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
+start_chrome() {
+    local url="$1"
+    local loading="$2"
+    
+    # First show loading screen if requested
+    if [ "$loading" = true ]; then
+        echo "Showing loading screen..."
+        pkill -f "chrome.*--kiosk"
+        google-chrome --password-store=basic --kiosk --no-first-run \
+            --disable-pinch --disable-infobars --noerrdialogs \
+            "$LOADING_SCREEN" >/dev/null 2>&1 &
+        sleep 2  # Allow loading screen to appear
+    fi
+    
+    # Now load actual content
+    echo "Loading: $url"
+    pkill -f "chrome.*--kiosk"
+    google-chrome --password-store=basic --kiosk --no-first-run \
+        --disable-pinch --disable-infobars --noerrdialogs \
+        --disable-component-update --check-for-update-interval=31536000 \
+        "$url" >/dev/null 2>&1 &
+    chrome_pid=$!
+    
+    # Hide cursor (optional)
+    command -v unclutter >/dev/null && unclutter -idle 1 &
+}
+
+get_scheduled_content() {
+    if [ "$use_admin_panel" = false ]; then
+        # Fallback to config file if admin panel not used
+        return
+    fi
+    
+    # Attempt to get scheduled content from admin panel API
+    local response
+    response=$(curl -s "$ADMIN_PANEL_URL/api/current-content" 2>/dev/null)
+    
+    # Check if we got a valid response
+    if [ -n "$response" ]; then
+        # Extract URL using grep and sed
+        local scheduled_url=$(echo "$response" | grep -o '"url":"[^"]*' | sed 's/"url":"//')
+        local is_offline=$(echo "$response" | grep -o '"is_offline":[0-9]' | sed 's/"is_offline"://')
+        
+        if [ -n "$scheduled_url" ]; then
+            # Override the config values with scheduled content
+            if [ "$is_offline" = "1" ]; then
+                # This is offline content
+                offline_video_page="$scheduled_url"
+                echo "Using scheduled offline content: $scheduled_url"
+            else
+                # This is regular content
+                main_page="$scheduled_url"
+                echo "Using scheduled content: $scheduled_url"
+            fi
+        fi
+    else
+        echo "Could not fetch scheduled content, using defaults"
+    fi
+}
+
+start_admin_panel() {
+    if [ -f "/home/kiosk/kiosk_admin_panel.py" ]; then
+        echo "Starting admin panel server..."
+        
+        # Check if already running
+        if [ -f "$ADMIN_PID_FILE" ]; then
+            local pid=$(cat "$ADMIN_PID_FILE")
+            if kill -0 "$pid" 2>/dev/null; then
+                echo "Admin panel already running with PID $pid"
+                return
+            fi
+        fi
+        
+        # Start the admin panel
+        nohup python3 /home/kiosk/kiosk_admin_panel.py > "$ADMIN_LOG_FILE" 2>&1 &
+        echo $! > "$ADMIN_PID_FILE"
+        echo "Admin panel started with PID $!"
+        
+        # Allow some time for the server to start
+        sleep 3
+    else
+        echo "Admin panel script not found at /home/kiosk/kiosk_admin_panel.py"
+        echo "Disabling admin panel features"
+        use_admin_panel=false
+    fi
+}
+
+handle_keyboard_shortcuts() {
+    # Monitor for keyboard shortcuts
+    if command -v xdotool >/dev/null; then
+        # Admin panel shortcut (Ctrl+A)
+        if xdotool search --onlyvisible --class "Chrome" key --window %@ ctrl+a >/dev/null 2>&1; then
+            echo "Admin panel shortcut detected"
+            start_chrome "$ADMIN_PANEL_URL" true
+            sleep 10  # Give time to use admin panel
+            start_chrome "$main_page" true  # Return to regular content
+        fi
+        
+        # Force refresh shortcut (Ctrl+R)
+        if xdotool search --onlyvisible --class "Chrome" key --window %@ ctrl+r >/dev/null 2>&1; then
+            echo "Refresh shortcut detected"
+            start_chrome "$main_page" true
+        fi
+    fi
+}
+
+# -------------------------------------------------------------------
+# MAIN LOOP
+# -------------------------------------------------------------------
+
+# Start admin panel
+start_admin_panel
+
+# Initial start (with loading screen)
+get_scheduled_content
+start_chrome "$main_page" true
+
+while true; do
+    # Check for config changes
+    load_config
+    
+    # Get scheduled content if available
+    get_scheduled_content
+    
+    # URL change detection
+    if [ "$last_main_page" != "$main_page" ] || \
+       [ "$last_offline_page" != "$offline_video_page" ]; then
+        echo "URL change detected - reloading..."
+        last_main_page="$main_page"
+        last_offline_page="$offline_video_page"
+        start_chrome "$main_page" true
+        current_mode="online"
+        elapsed_time=0
+    fi
+
+    # Chrome health check
+    if ! check_chrome_errors; then
+        echo "Chrome error - recovering..."
+        start_chrome "$main_page" true
+        current_mode="online"
+        elapsed_time=0
+    fi
+
+    # Internet state machine
+    if check_internet; then
+        if [ "$current_mode" != "online" ]; then
+            echo "Internet restored - switching to main page"
+            get_scheduled_content  # Refresh scheduled content when going back online
+            start_chrome "$main_page" true
+            current_mode="online"
+            elapsed_time=0
+        fi
+    else
+        echo "Internet offline (${elapsed_time}s)"
+        ((elapsed_time += check_interval))
+        
+        if [ "$current_mode" = "online" ] && [ $elapsed_time -ge $timeout ]; then
+            echo "Switching to offline content"
+            start_chrome "$offline_video_page" true
+            current_mode="offline"
+        fi
+    fi
+    
+    # Check for keyboard shortcuts
+    handle_keyboard_shortcuts
+
+    sleep $check_interval
+done

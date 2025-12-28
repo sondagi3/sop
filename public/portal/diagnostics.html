@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>KioskOps Portal Diagnostics</title>
+  <style>
+    body{font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif;padding:24px;line-height:1.4}
+    code{background:rgba(0,0,0,.06);padding:2px 6px;border-radius:6px}
+    .ok{color:#0a7}
+    .bad{color:#b00}
+    .card{border:1px solid rgba(0,0,0,.15);border-radius:12px;padding:16px;margin:12px 0}
+    a{color:inherit}
+  </style>
+</head>
+<body>
+  <h1>KioskOps Portal Diagnostics</h1>
+  <p>If your portal shows a red banner ("Portal script did not load"), use this page to confirm why.</p>
+
+  <div class="card">
+    <h2>1) Can the browser fetch <code>/assets/app.js</code>?</h2>
+    <p id="jsStatus">Checking...</p>
+  </div>
+
+  <div class="card">
+    <h2>2) Quick Fixes</h2>
+    <ul>
+      <li>Make sure you're opening: <code>http://localhost:8787/index.html</code> (NOT <code>file://</code>)</li>
+      <li>Stop old servers on port 8787: <code>lsof -i :8787</code> then <code>kill &lt;PID&gt;</code></li>
+      <li>Run the server from portal root using: <code>scripts/run_server_ubuntu.sh</code> or <code>scripts/run_server_windows.bat</code></li>
+      <li>Open this debug URL: <a href="/assets/app.js" target="_blank"><code>/assets/app.js</code></a></li>
+    </ul>
+  </div>
+
+<script>
+(async ()=>{
+  const el = document.getElementById('jsStatus');
+  try{
+    const r = await fetch('/assets/app.js', {cache:'no-store'});
+    const ct = r.headers.get('content-type') || '';
+    if(!r.ok){
+      el.innerHTML = `<span class="bad">FAIL</span> HTTP ${r.status}. This means the server is pointing at the wrong folder.`;
+      return;
+    }
+    const txt = await r.text();
+    const hasFlag = txt.includes('window.__KIOSKOPS_APP_LOADED__');
+    el.innerHTML = `<span class="ok">OK</span> Loaded (${ct}). ${hasFlag ? "App flag found." : "App flag not found, but JS loaded."}`;
+  }catch(e){
+    el.innerHTML = `<span class="bad">FAIL</span> Fetch blocked. You are likely in <code>file://</code> mode or a restrictive browser mode. Use the local server and open <code>http://localhost:8787/index.html</code>.`;
+  }
+})();
+</script>
+</body>
+</html>

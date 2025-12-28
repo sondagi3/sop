@@ -1,0 +1,60 @@
+(async function() {
+  const delay = ms => new Promise(r => setTimeout(r, ms));
+  const tableSelector = "table.list-table"; // target your table
+  const nextSelector = "a.paging-nav-next, a[href*='page=next']"; // detect Next button
+
+  function scrapeTable() {
+    const table = document.querySelector(tableSelector);
+    if (!table) return [];
+    return Array.from(table.querySelectorAll("tr")).map(tr =>
+      Array.from(tr.querySelectorAll("th, td"))
+        .map(td => `"${td.innerText.replace(/"/g, '""').trim()}"`)
+        .join(",")
+    );
+  }
+
+  async function waitForTableUpdate(prevHTML) {
+    // wait until the table HTML changes (AJAX load completed)
+    for (let i = 0; i < 20; i++) {
+      await delay(500);
+      const currentHTML = document.querySelector(tableSelector)?.innerHTML;
+      if (currentHTML && currentHTML !== prevHTML) return true;
+    }
+    return false; // timeout after 10s
+  }
+
+  let csvRows = [];
+  let page = 1;
+
+  while (true) {
+    console.log(`📄 Scraping page ${page}...`);
+    const table = document.querySelector(tableSelector);
+    if (!table) break;
+
+    const rows = scrapeTable();
+    if (page > 1 && rows.length > 1) rows.shift(); // skip duplicate header
+    csvRows.push(...rows);
+
+    const next = document.querySelector(nextSelector);
+    if (!next || next.classList.contains("disabled") || next.getAttribute("aria-disabled") === "true") {
+      console.log("✅ No more pages detected.");
+      break;
+    }
+
+    const prevHTML = table.innerHTML;
+    next.click();
+
+    console.log("⏳ Waiting for next page to load...");
+    await waitForTableUpdate(prevHTML); // wait until table content changes
+    await delay(500); // small buffer
+    page++;
+  }
+
+  const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "zabbix_availability_report_full.csv";
+  a.click();
+  console.log("📦 Export complete — all pages combined!");
+})();

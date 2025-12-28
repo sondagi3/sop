@@ -1,0 +1,10 @@
+rm -rf ~/.local/share/keyrings/* 
+rm -rf /home/kiosk/.local/share/keyrings/* 
+reboot
+
+pkill chrome
+rm -f ~/.config/google-chrome/SingletonLock
+rm -f ~/.config/google-chrome/SingletonSocket
+google-chrome
+
+rm -rf ~/.local/share/keyrings/* && rm -rf /home/kiosk/.local/share/keyrings/* && reboot && pkill chrome && rm -f ~/.config/google-chrome/SingletonLock && rm -f ~/.config/google-chrome/SingletonSocket && google-chrome && sleep 1 && xdotool type "  " && xdotool key Return
